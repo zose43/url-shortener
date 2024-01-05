@@ -1,9 +1,12 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
+	"url-shortener/src/internal/storage"
 )
 
 type Storage struct {
@@ -33,4 +36,30 @@ create index if not exists idx_alias on urls(alias);
 	}
 
 	return &Storage{db: db}, nil
+}
+
+func (s *Storage) SaveURL(ctx context.Context, urlToSave string, alias string) (int64, error) {
+	const op = "storage.sqlite.saveURL"
+
+	stmt, err := s.db.PrepareContext(ctx, "insert into urls (alias, url) values (?, ?)")
+	if err != nil {
+		return 0, fmt.Errorf("%s %w", op, err)
+	}
+
+	res, err := stmt.ExecContext(ctx, alias, urlToSave)
+	if err != nil {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) && errors.Is(sqliteErr.Code, sqlite3.ErrConstraint) {
+			return 0, fmt.Errorf("%s %w", op, storage.ErrUrlExists)
+		}
+
+		return 0, fmt.Errorf("%s %w", op, err)
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last insert id, %s %w", op, err)
+	}
+
+	return id, nil
 }
